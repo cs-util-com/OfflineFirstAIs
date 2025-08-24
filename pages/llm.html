@@ -63,163 +63,21 @@
     </header>
     
     <div class="bg-white p-6 rounded-lg shadow-md mb-8">
-      <div class="max-w-4xl mx-auto p-4 bg-gray-900 text-gray-200 rounded-lg">
-        <h2 class="text-xl font-semibold mb-3 text-gray-200">Gemma 3 270M (ONNX) – Vanilla JS</h2>
-  
-        <div id="chat" class="mb-4"></div>
-  
-        <div class="flex gap-2 my-4">
-          <textarea id="prompt" placeholder="Ask something…" class="flex-1 min-h-20 p-3 rounded-lg border border-gray-600 bg-gray-800 text-gray-200 placeholder-gray-400 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
-          <button id="send" class="px-4 py-3 rounded-lg border border-gray-600 bg-gray-700 text-gray-200 hover:bg-gray-600 disabled:opacity-60 disabled:cursor-not-allowed transition-colors">Send</button>
-        </div>
-        <div class="flex gap-2 items-center mt-4">
-          <button id="clear" class="px-4 py-2 rounded-lg border border-gray-600 bg-gray-700 text-gray-200 hover:bg-gray-600 transition-colors">Clear</button>
-          <span id="status" class="text-xs text-gray-400"></span>
-        </div>
-        <div id="progress-container" class="w-full bg-gray-600 rounded my-2 overflow-hidden" style="display: none;">
-          <div id="progress-bar" class="h-2 bg-blue-500 rounded transition-all duration-300 ease-out" style="width: 0%;"></div>
-          <div id="progress-text" class="text-xs text-gray-400 mt-1"></div>
-        </div>
-      </div>
+      <div id="llm-chat-container"></div>
     </div>
   </div>
 
   <script type="module">
-    import { pipeline, TextStreamer, env } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers";
+    import { LLMChat, LLMChatUI } from '../src/components/llm.js';
 
-    // Keep downloads remote and cached by the browser (recommended for a quick demo)
-    env.allowLocalModels = false;
+    // Initialize the LLM chat
+    const llmChat = new LLMChat({
+      systemPrompt: "You are a helpful, concise assistant."
+    });
 
-    const statusEl = document.getElementById("status");
-    const sendBtn  = document.getElementById("send");
-    const clearBtn = document.getElementById("clear");
-    const promptEl = document.getElementById("prompt");
-    const chatEl   = document.getElementById("chat");
-    const progressContainer = document.getElementById("progress-container");
-    const progressBar = document.getElementById("progress-bar");
-    const progressText = document.getElementById("progress-text");
-
-    // Basic chat history (system + turns)
-    const messages = [
-      { role: "system", content: "You are a helpful, concise assistant." }
-    ];
-
-    // Progress callback for model loading
-    function onProgress(progress) {
-      console.log('Progress update:', progress); // Debug log
-      
-      // Show progress container when any progress event occurs
-      progressContainer.style.display = 'block';
-      
-      if (progress.status === 'downloading' || progress.status === 'progress') {
-        if (progress.loaded && progress.total) {
-          const percentage = Math.round((progress.loaded / progress.total) * 100);
-          progressBar.style.width = `${percentage}%`;
-          const loadedMB = (progress.loaded / 1024 / 1024).toFixed(1);
-          const totalMB = (progress.total / 1024 / 1024).toFixed(1);
-          const fileName = progress.file || progress.name || 'model file';
-          progressText.textContent = `Downloading ${fileName}: ${percentage}% (${loadedMB}MB / ${totalMB}MB)`;
-        } else {
-          progressText.textContent = `Downloading ${progress.file || progress.name || 'model files'}...`;
-        }
-      } else if (progress.status === 'loading' || progress.status === 'initiate') {
-        progressText.textContent = `Loading ${progress.file || progress.name || 'model'}...`;
-      } else if (progress.status === 'done' || progress.status === 'ready') {
-        // Don't hide progress or show success message here - let the main loading handle it
-        progressText.textContent = `Finalizing ${progress.file || progress.name || 'model'}...`;
-      } else {
-        // Handle any other progress events
-        progressText.textContent = `${progress.status || 'Loading'}...`;
-      }
-    }
-
-    // Helper to add chat bubbles
-    function addBubble(role, text, isMuted = false) {
-      const row = document.createElement("div"); 
-      row.className = "flex gap-3 items-start my-3";
-      
-      const r = document.createElement("div"); 
-      r.className = "flex-none w-20 text-xs uppercase tracking-wide opacity-70";
-      r.textContent = role;
-      
-      const b = document.createElement("div"); 
-      b.className = `flex-1 whitespace-pre-wrap leading-relaxed bg-gray-800 border border-gray-600 rounded-xl p-3 ${isMuted ? 'opacity-70' : ''}`;
-      b.textContent = text;
-      
-      row.append(r, b); 
-      chatEl.appendChild(row);
-      return b;
-    }
-
-    // Prefer WebGPU (faster). Fall back to WASM.
-    const device = (navigator.gpu) ? "webgpu" : "wasm";
-    const dtype = (device === "webgpu") ? "fp16" : "q4";
-
-    let generator;
-
-    statusEl.textContent = `Loading model (device: ${device}, dtype: ${dtype})…`;
-    progressContainer.style.display = 'block';
-    progressText.textContent = 'Initializing model download...';
-
-    try {
-      generator = await pipeline(
-        "text-generation",
-        "onnx-community/gemma-3-270m-it-ONNX",
-        { device, dtype, progress_callback: onProgress }
-      );
-
-      statusEl.textContent = "Ready";
-      progressContainer.style.display = 'none';
-    } catch (error) {
-      console.error('Error loading model:', error);
-      statusEl.textContent = "Error loading model";
-      progressContainer.style.display = 'none';
-      progressText.textContent = `Error: ${error.message}`;
-    }
-
-    async function generate() {
-      const userText = promptEl.value.trim();
-      if (!userText || !generator) return;
-
-      addBubble("User", userText);
-      messages.push({ role: "user", content: userText });
-
-      const outBubble = addBubble("Assistant", "");
-
-      sendBtn.disabled = true;
-      statusEl.textContent = "Generating…";
-
-      const streamer = new TextStreamer(generator.tokenizer, {
-        skip_prompt: true,
-        skip_special_tokens: true,
-        callback_function: (text) => { outBubble.textContent += text; }
-      });
-
-      try {
-        const output = await generator(messages, {
-          max_new_tokens: 256,
-          do_sample: false,
-          streamer
-        });
-
-        const finalMsg = output[0].generated_text.at(-1)?.content ?? outBubble.textContent;
-        outBubble.textContent = finalMsg;
-        messages.push({ role: "assistant", content: finalMsg });
-      } catch (err) {
-        outBubble.textContent = `❌ Error: ${err?.message || err}`;
-        console.error(err);
-      } finally {
-        sendBtn.disabled = false;
-        statusEl.textContent = "";
-        promptEl.value = "";
-        promptEl.focus();
-      }
-    }
-
-    sendBtn.addEventListener("click", generate);
-    promptEl.addEventListener("keydown", (e) => (e.key === "Enter" && (e.ctrlKey || e.metaKey)) ? generate() : null );
-    clearBtn.addEventListener("click", () => { chatEl.innerHTML = ""; messages.splice(1); });
-
+    // Create the UI
+    const container = document.getElementById('llm-chat-container');
+    const chatUI = new LLMChatUI(container, llmChat);
   </script>
 </body>
 </html>
