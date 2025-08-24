@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>LLM Demo - Template Web App</title>
+  <title>TTS Demo - Template Web App</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23fff'/%3E%3C/svg%3E" type="image/svg+xml">
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
@@ -52,33 +52,33 @@
       <h1 class="text-3xl font-bold text-blue-600 mb-4">Template Web App</h1>
       <nav class="bg-blue-600 text-white p-4 rounded-lg mb-4">
         <a href="../index.html" class="mr-6 hover:underline">Home</a>
-        <a href="llm.html" class="mr-6 hover:underline font-bold relative" aria-current="page">
-          LLM Demo
+        <a href="llm.html" class="mr-6 hover:underline">LLM Demo</a>
+        <a href="tts.html" class="mr-6 hover:underline font-bold relative" aria-current="page">
+          TTS Demo
           <span class="absolute bottom-0 left-0 w-full h-0.5 bg-white"></span>
         </a>
-        <a href="tts.html" class="mr-6 hover:underline">TTS Demo</a>
       </nav>
       <div class="bg-blue-100 border-l-4 border-blue-500 p-4 mb-6">
-        <p class="text-sm text-blue-700">This page demonstrates running a local LLM in the browser using Transformers.js.</p>
+        <p class="text-sm text-blue-700">This page demonstrates running local Text-to-Speech in the browser using kokoro-js.</p>
       </div>
     </header>
     
     <div class="bg-white p-6 rounded-lg shadow-md mb-8">
-      <div id="llm-chat-container"></div>
+      <div id="tts-container"></div>
     </div>
   </div>
 
   <script type="module">
-    import { LLMChat, LLMChatUI } from '../src/components/llm.js';
+    import { TTSEngine, TTSUI } from '../src/components/tts.js';
 
-    // Initialize the LLM chat
-    const llmChat = new LLMChat({
-      systemPrompt: "You are a helpful, concise assistant."
+    // Initialize the TTS engine
+    const ttsEngine = new TTSEngine({
+      defaultVoice: "af_heart"
     });
 
     // Create the UI
-    const container = document.getElementById('llm-chat-container');
-    const chatUI = new LLMChatUI(container, llmChat);
+    const container = document.getElementById('tts-container');
+    const ttsUI = new TTSUI(container, ttsEngine);
   </script>
 </body>
 </html>
