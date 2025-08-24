@@ -3,7 +3,24 @@
  * Provides local LLM functionality using Transformers.js with Gemma 3 270M model
  */
 
-import { pipeline, TextStreamer, env } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers";
+// Default import for browser usage
+let transformersModule = null;
+
+// Function to set transformers module (for testing)
+export function setTransformersModule(module) {
+  transformersModule = module;
+}
+
+// Function to get transformers module
+async function getTransformers() {
+  if (transformersModule) {
+    return transformersModule;
+  }
+  
+  // Dynamic import for browser usage
+  const module = await import("https://cdn.jsdelivr.net/npm/@huggingface/transformers");
+  return module;
+}
 
 export class LLMChat {
   constructor(options = {}) {
@@ -39,14 +56,16 @@ export class LLMChat {
     
     this.isLoading = true;
     
-    // Keep downloads remote and cached by the browser
-    env.allowLocalModels = false;
-
-    // Prefer WebGPU (faster). Fall back to WASM.
-    const device = (navigator.gpu) ? "webgpu" : "wasm";
-    const dtype = (device === "webgpu") ? "fp16" : "q4";
-
     try {
+      const { pipeline, env } = await getTransformers();
+      
+      // Keep downloads remote and cached by the browser
+      env.allowLocalModels = false;
+
+      // Prefer WebGPU (faster). Fall back to WASM.
+      const device = (navigator.gpu) ? "webgpu" : "wasm";
+      const dtype = (device === "webgpu") ? "fp16" : "q4";
+
       this.generator = await pipeline(
         "text-generation",
         this.options.modelId,
@@ -107,6 +126,8 @@ export class LLMChat {
     }
 
     try {
+      const { TextStreamer } = await getTransformers();
+      
       // Create streamer for real-time output
       const streamer = new TextStreamer(this.generator.tokenizer, {
         skip_prompt: true,
