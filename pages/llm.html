@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LLM Demo - Template Web App</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23fff'/%3E%3C/svg%3E" type="image/svg+xml">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @view-transition {
+      navigation: auto;
+    }
+    
+    nav a[aria-current="page"]:after {
+      border-color: white;
+      view-transition-name: posts-nav;
+    }
+    
+    ::view-transition-old(posts-nav) {
+      animation: fade 0.2s linear forwards;
+      height: 100%;
+    }
+    
+    ::view-transition-new(posts-nav) {
+      animation: fade 0.3s linear reverse;
+      height: 100%;
+    }
+    
+    @keyframes fade {
+      from { opacity: 1; }
+      to { opacity: 0; }
+    }
+
+    /* Styles from llm.md, adapted for this page */
+    .llm-demo-wrap {
+      max-width: 880px;
+      margin: 0 auto;
+      padding: 16px;
+      background: #0b0b0c;
+      color: #e7e7ea;
+      border-radius: 8px;
+    }
+    .llm-demo-wrap h2 { font-size: 20px; font-weight: 600; margin: 0 0 12px; }
+    .llm-demo-wrap .bar { display: flex; gap: 8px; margin: 12px 0 16px; }
+    .llm-demo-wrap textarea { width: 100%; min-height: 80px; padding: 10px; border-radius: 8px; border: 1px solid #2a2a2d; background:#131316; color:#e7e7ea; }
+    .llm-demo-wrap button { padding: 10px 14px; border-radius: 8px; border: 1px solid #2a2a2d; background:#1b1b1f; color:#e7e7ea; cursor:pointer; }
+    .llm-demo-wrap button[disabled] { opacity:.6; cursor:not-allowed; }
+    .llm-demo-wrap .row { display:flex; gap:10px; align-items:flex-start; margin: 10px 0; }
+    .llm-demo-wrap .role { flex: 0 0 88px; opacity:.7; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
+    .llm-demo-wrap .bubble { flex: 1 1 auto; white-space: pre-wrap; line-height: 1.45; background:#111114; border:1px solid #242428; border-radius:12px; padding:12px; }
+    .llm-demo-wrap .muted { opacity:.7; }
+    .llm-demo-wrap .status { margin-top: 6px; font-size:12px; opacity:.7; }
+    .llm-demo-wrap .footer { margin-top: 14px; display:flex; gap:8px; align-items:center; }
+    .llm-demo-wrap .tiny { font-size: 12px; opacity:.7; }
+    .llm-demo-wrap a { color:#9ecbff; }
+  </style>
+  <script>
+    // Only use if browser supports View Transitions
+    if (document.startViewTransition) {
+      window.addEventListener('click', (e) => {
+        // Only handle internal links
+        if (e.target.tagName === 'A' && e.target.origin === window.location.origin) {
+          e.preventDefault();
+          document.startViewTransition(() => {
+            window.location.href = e.target.href;
+          });
+        }
+      });
+    }
+  </script>
+</head>
+<body class="font-mono p-8 bg-gray-50">
+  <div class="max-w-4xl mx-auto">
+    <header class="mb-8">
+      <h1 class="text-3xl font-bold text-blue-600 mb-4">Template Web App</h1>
+      <nav class="bg-blue-600 text-white p-4 rounded-lg mb-4">
+        <a href="../index.html" class="mr-6 hover:underline">Home</a>
+        <a href="llm.html" class="mr-6 hover:underline font-bold relative" aria-current="page">
+          LLM Demo
+          <span class="absolute bottom-0 left-0 w-full h-0.5 bg-white"></span>
+        </a>
+      </nav>
+      <div class="bg-blue-100 border-l-4 border-blue-500 p-4 mb-6">
+        <p class="text-sm text-blue-700">This page demonstrates running a local LLM in the browser using Transformers.js.</p>
+      </div>
+    </header>
+    
+    <div class="bg-white p-6 rounded-lg shadow-md mb-8 feature-section">
+      <div class="llm-demo-wrap">
+        <h2>Gemma 3 270M (ONNX) – Vanilla JS</h2>
+  
+        <div id="chat"></div>
+  
+        <div class="bar">
+          <textarea id="prompt" placeholder="Ask something…"></textarea>
+          <button id="send">Send</button>
+        </div>
+        <div class="footer">
+          <button id="clear">Clear</button>
+          <span class="tiny" id="status"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { pipeline, TextStreamer, env } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers";
+
+    // Keep downloads remote and cached by the browser (recommended for a quick demo)
+    env.allowLocalModels = false;
+
+    const statusEl = document.getElementById("status");
+    const sendBtn  = document.getElementById("send");
+    const clearBtn = document.getElementById("clear");
+    const promptEl = document.getElementById("prompt");
+    const chatEl   = document.getElementById("chat");
+
+    // Basic chat history (system + turns)
+    const messages = [
+      { role: "system", content: "You are a helpful, concise assistant." }
+    ];
+
+    // Helper to add chat bubbles
+    function addBubble(role, text, isMuted = false) {
+      const row = document.createElement("div"); row.className = "row";
+      const r = document.createElement("div"); r.className = "role"; r.textContent = role;
+      const b = document.createElement("div"); b.className = "bubble"; if (isMuted) b.classList.add("muted");
+      b.textContent = text;
+      row.append(r, b); chatEl.appendChild(row);
+      return b;
+    }
+
+    // Prefer WebGPU (faster). Fall back to WASM.
+    const device = (navigator.gpu) ? "webgpu" : "wasm";
+    const dtype = (device === "webgpu") ? "fp16" : "q4";
+
+    statusEl.textContent = `Loading model (device: ${device}, dtype: ${dtype})…`;
+
+    const generator = await pipeline(
+      "text-generation",
+      "onnx-community/gemma-3-270m-it-ONNX",
+      { device, dtype }
+    );
+
+    statusEl.textContent = "Ready";
+
+    async function generate() {
+      const userText = promptEl.value.trim();
+      if (!userText) return;
+
+      addBubble("User", userText);
+      messages.push({ role: "user", content: userText });
+
+      const outBubble = addBubble("Assistant", "");
+
+      sendBtn.disabled = true;
+      statusEl.textContent = "Generating…";
+
+      const streamer = new TextStreamer(generator.tokenizer, {
+        skip_prompt: true,
+        skip_special_tokens: true,
+        callback_function: (text) => { outBubble.textContent += text; }
+      });
+
+      try {
+        const output = await generator(messages, {
+          max_new_tokens: 256,
+          do_sample: false,
+          streamer
+        });
+
+        const finalMsg = output[0].generated_text.at(-1)?.content ?? outBubble.textContent;
+        outBubble.textContent = finalMsg;
+        messages.push({ role: "assistant", content: finalMsg });
+      } catch (err) {
+        outBubble.textContent = `❌ Error: ${err?.message || err}`;
+        console.error(err);
+      } finally {
+        sendBtn.disabled = false;
+        statusEl.textContent = "";
+        promptEl.value = "";
+        promptEl.focus();
+      }
+    }
+
+    sendBtn.addEventListener("click", generate);
+    promptEl.addEventListener("keydown", (e) => (e.key === "Enter" && (e.ctrlKey || e.metaKey)) ? generate() : null );
+    clearBtn.addEventListener("click", () => { chatEl.innerHTML = ""; messages.splice(1); });
+
+  </script>
+</body>
+</html>
