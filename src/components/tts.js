@@ -22,27 +22,19 @@ async function getKokoro() {
   return module;
 }
 
+/**
+ * Text-to-Speech Engine using kokoro-js library
+ * Provides both standard and streaming TTS functionality
+ */
 export class TTSEngine {
-  constructor(options = {}) {
-    this.options = {
-      modelId: "onnx-community/Kokoro-82M-v1.0-ONNX",
-      defaultVoice: "af_heart",
-      defaultSpeed: 1.0,
-      ...options
-    };
-
-    this.tts = null;
-    this.voices = [];
-    this.backend = { device: 'wasm', dtype: 'q8' }; // default fallback
+  constructor(voice = 'af') {
+    this.kokoroInstance = null;
+    this.streamingInstance = null;
+    this.isInitialized = false;
     this.isLoading = false;
     this.isGenerating = false;
-    
-    // Event callbacks
-    this.onProgress = null;
-    this.onReady = null;
-    this.onError = null;
-    this.onVoicesLoaded = null;
-    this.onAudioGenerated = null;
+    this.currentVoice = voice;
+    this.streamingMode = false;
   }
 
   /**
