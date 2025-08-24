@@ -1,20 +1,12 @@
 /**
- * TTS (Text-to-Speech) Component
- * Provides local TTS functionality using kokoro-js with WebGPU and WASM fallback
+ * TTS (Text-to-Speech) components using kokoro-js library
+ * Provides modular TTS functionality for web applications
  */
 
-// Default import for browser usage
-let kokoroModule = null;
-
-// Function to set kokoro module (for testing)
-export function setKokoroModule(module) {
-  kokoroModule = module;
-}
-
-// Function to get kokoro module
-async function getKokoro() {
-  if (kokoroModule) {
-    return kokoroModule;
+// Helper function to load kokoro-js library
+async function getKokoro(injectedLib = null) {
+  if (injectedLib) {
+    return injectedLib;
   }
   
   // Dynamic import for browser usage
@@ -30,6 +22,7 @@ export class TTSEngine {
   constructor(voice = 'af') {
     this.kokoroInstance = null;
     this.streamingInstance = null;
+    this.kokoroLib = null;
     this.isInitialized = false;
     this.isLoading = false;
     this.isGenerating = false;
@@ -38,412 +31,363 @@ export class TTSEngine {
   }
 
   /**
-   * Detect WebGPU availability
-   */
-  async detectWebGPU() {
-    if (!('gpu' in navigator)) return false;
-    try {
-      const adapter = await navigator.gpu.requestAdapter();
-      return !!adapter;
-    } catch {
-      return false;
-    }
-  }
-
-  /**
    * Initialize the TTS engine
+   * @param {Function} progressCallback - Called with progress updates
+   * @param {Function} errorCallback - Called with errors
+   * @param {Object} kokoroLib - Optional injected library for testing
    */
-  async initialize() {
-    if (this.tts) return this.tts;
-    
+  async initialize(progressCallback = () => {}, errorCallback = () => {}, kokoroLib = null) {
+    if (this.isInitialized) {
+      return;
+    }
+
     this.isLoading = true;
     
     try {
-      const { KokoroTTS } = await getKokoro();
+      progressCallback({ 
+        status: 'loading', 
+        message: 'Loading kokoro-js library...' 
+      });
+
+      // Use injected library or load from CDN
+      const kokoro = kokoroLib || await getKokoro();
       
-      if (this.onProgress) {
-        this.onProgress({ status: 'detecting', message: 'Checking WebGPU availability...' });
-      }
-
-      // Detect and choose backend
-      const canWebGPU = await this.detectWebGPU();
-      this.backend = canWebGPU 
-        ? { device: 'webgpu', dtype: 'fp32' } 
-        : { device: 'wasm', dtype: 'q8' };
-
-      if (this.onProgress) {
-        this.onProgress({ 
-          status: 'loading', 
-          message: `Loading model (${this.backend.device}/${this.backend.dtype})...`,
-          backend: this.backend
-        });
-      }
-
-      try {
-        this.tts = await KokoroTTS.from_pretrained(this.options.modelId, this.backend);
-      } catch (err) {
-        // If WebGPU path fails, fall back to WASM automatically
-        if (this.backend.device === 'webgpu') {
-          if (this.onProgress) {
-            this.onProgress({ 
-              status: 'fallback', 
-              message: 'WebGPU failed, falling back to WASM...',
-              error: err.message
-            });
-          }
-          
-          this.tts = await KokoroTTS.from_pretrained(this.options.modelId, { device: 'wasm', dtype: 'q8' });
-          this.backend = { device: 'wasm', dtype: 'q8' };
-        } else {
-          throw err;
-        }
-      }
-
-      // Load available voices
-      if (this.onProgress) {
-        this.onProgress({ status: 'voices', message: 'Loading voices...' });
-      }
-
-      this.voices = await this.tts.list_voices();
-
-      this.isLoading = false;
+      // Store the library reference for later use
+      this.kokoroLib = kokoro;
       
-      if (this.onVoicesLoaded) {
-        this.onVoicesLoaded(this.voices);
+      progressCallback({ 
+        status: 'loading', 
+        message: 'Initializing TTS engine...' 
+      });
+
+      // Initialize standard TTS
+      this.kokoroInstance = new kokoro.KokoroText2Speech();
+      await this.kokoroInstance.ready();
+      await this.kokoroInstance.loadVoice(this.currentVoice);
+
+      // Initialize streaming TTS if requested
+      if (this.streamingMode) {
+        this.streamingInstance = new kokoro.KokoroStreamingTTS();
+        await this.streamingInstance.ready();
+        await this.streamingInstance.loadVoice(this.currentVoice);
       }
+
+      this.isInitialized = true;
       
-      if (this.onReady) {
-        this.onReady({ backend: this.backend, voices: this.voices });
-      }
-      
-      return this.tts;
+      progressCallback({ 
+        status: 'success', 
+        message: 'TTS engine initialized successfully!' 
+      });
+
     } catch (error) {
+      errorCallback(`Failed to initialize TTS engine: ${error.message}`);
+    } finally {
       this.isLoading = false;
-      
-      if (this.onError) {
-        this.onError(error);
-      }
-      
-      throw error;
     }
   }
 
   /**
    * Generate speech from text
+   * @param {string} text - Text to convert to speech
+   * @returns {Object} Result object with success status and audio URL or error
    */
-  async generateSpeech(text, options = {}) {
-    if (!text.trim()) return null;
-    if (!this.tts) {
-      throw new Error("TTS engine not initialized. Call initialize() first.");
+  async generateSpeech(text) {
+    if (!this.isInitialized) {
+      return { success: false, error: 'TTS engine not initialized' };
     }
+
+    if (!text || text.trim() === '') {
+      return { success: false, error: 'Text cannot be empty' };
+    }
+
     if (this.isGenerating) {
-      throw new Error("Already generating speech. Please wait.");
+      return { success: false, error: 'Speech generation already in progress' };
     }
 
     this.isGenerating = true;
-    
-    const config = {
-      voice: options.voice || this.options.defaultVoice,
-      speed: options.speed || this.options.defaultSpeed,
-      ...options
-    };
 
     try {
-      if (this.onProgress) {
-        this.onProgress({ 
-          status: 'generating', 
-          message: `Generating speech with voice "${config.voice}"...`,
-          config
-        });
-      }
-
-      const audio = await this.tts.generate(text, config);
-      const blob = await audio.toBlob(); // Convert to WAV Blob
-      const url = URL.createObjectURL(blob);
-
-      this.isGenerating = false;
-
-      const result = {
-        audio,
-        blob,
-        url,
-        text,
-        config,
-        size: blob.size
-      };
-
-      if (this.onAudioGenerated) {
-        this.onAudioGenerated(result);
-      }
-
-      return result;
+      // Generate audio data
+      const audioData = await this.kokoroInstance.tts(text);
       
+      // Create WAV file - use the library that was originally injected
+      const kokoro = this.kokoroLib || await getKokoro();
+      const header = kokoro.writeWAVHeader(audioData.length, 24000);
+      const wavData = kokoro.writeWAVData(audioData, 24000);
+      
+      // Create blob and URL
+      const blob = new Blob([header, wavData], { type: 'audio/wav' });
+      const audioUrl = URL.createObjectURL(blob);
+      
+      return { success: true, audioUrl };
+
     } catch (error) {
+      return { success: false, error: error.message };
+    } finally {
       this.isGenerating = false;
+    }
+  }
+
+  /**
+   * Stream speech generation (for real-time TTS)
+   * @param {string} text - Text to convert to speech
+   * @param {Function} onChunk - Called for each audio chunk
+   * @param {Function} onComplete - Called when streaming is complete
+   * @param {Function} onError - Called on error
+   */
+  async streamSpeech(text, onChunk, onComplete, onError) {
+    if (!this.streamingMode) {
+      onError('Streaming mode not enabled');
+      return;
+    }
+
+    if (!this.isInitialized) {
+      onError('TTS engine not initialized');
+      return;
+    }
+
+    try {
+      const generator = this.streamingInstance.streamTTS(text);
       
-      if (this.onError) {
-        this.onError(error);
+      for (const chunk of generator) {
+        onChunk(chunk);
       }
       
-      throw error;
+      onComplete();
+    } catch (error) {
+      onError(error.message);
+    }
+  }
+
+  /**
+   * Change the current voice
+   * @param {string} voiceId - Voice ID to switch to
+   * @returns {Object} Result object with success status
+   */
+  async changeVoice(voiceId) {
+    if (!this.isInitialized) {
+      return { success: false, error: 'TTS engine not initialized' };
+    }
+
+    try {
+      await this.kokoroInstance.loadVoice(voiceId);
+      
+      if (this.streamingInstance) {
+        await this.streamingInstance.loadVoice(voiceId);
+      }
+      
+      this.currentVoice = voiceId;
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error.message };
     }
   }
 
   /**
    * Get available voices
+   * @returns {Array} Array of voice objects
    */
-  getVoices() {
-    return [...this.voices];
+  getAvailableVoices() {
+    if (!this.isInitialized || !this.kokoroInstance) {
+      return [];
+    }
+    
+    return this.kokoroInstance.voices || [];
   }
 
   /**
-   * Check if engine is ready
+   * Clean up resources
    */
-  isReady() {
-    return !!this.tts && !this.isLoading;
-  }
-
-  /**
-   * Check if currently busy
-   */
-  isBusy() {
-    return this.isLoading || this.isGenerating;
-  }
-
-  /**
-   * Get current backend info
-   */
-  getBackend() {
-    return { ...this.backend };
+  cleanup() {
+    this.kokoroInstance = null;
+    this.streamingInstance = null;
+    this.isInitialized = false;
   }
 }
 
 /**
- * UI Helper class for creating TTS interfaces
+ * TTS UI Helper Class
+ * Provides UI components and event handling for TTS functionality
  */
 export class TTSUI {
-  constructor(containerElement, ttsEngine) {
-    this.container = containerElement;
+  constructor(ttsEngine) {
     this.tts = ttsEngine;
-    this.elements = {};
-    this.currentAudio = null;
-    
+    this.container = null;
     this.setupEventHandlers();
-    this.render();
   }
 
   setupEventHandlers() {
-    // Set up TTS event handlers
-    this.tts.onProgress = (progress) => this.handleProgress(progress);
-    this.tts.onReady = (info) => this.handleReady(info);
-    this.tts.onError = (error) => this.handleError(error);
-    this.tts.onVoicesLoaded = (voices) => this.handleVoicesLoaded(voices);
-    this.tts.onAudioGenerated = (result) => this.handleAudioGenerated(result);
+    // Set up TTS event handlers if they exist
+    if (this.tts) {
+      if (typeof this.tts.onProgress === 'undefined') this.tts.onProgress = null;
+      if (typeof this.tts.onReady === 'undefined') this.tts.onReady = null;
+      if (typeof this.tts.onError === 'undefined') this.tts.onError = null;
+      if (typeof this.tts.onVoicesLoaded === 'undefined') this.tts.onVoicesLoaded = null;
+    }
   }
 
-  render() {
-    this.container.innerHTML = `
-      <div class="max-w-4xl mx-auto p-4 bg-gradient-to-br from-purple-900 to-blue-900 text-white rounded-lg">
-        <h2 class="text-xl font-semibold mb-3 text-white">Local Text-to-Speech</h2>
+  /**
+   * Render the TTS interface
+   * @param {HTMLElement} container - Container element to render into
+   */
+  render(container) {
+    this.container = container;
+    
+    const voices = this.tts ? this.tts.getAvailableVoices() : [];
+    
+    container.innerHTML = `
+      <div class="max-w-4xl mx-auto p-6 bg-white rounded-lg shadow-lg">
+        <h2 class="text-2xl font-bold mb-6 text-center text-gray-800">Text-to-Speech Demo</h2>
         
-        <div class="flex gap-2 items-center mb-4">
-          <button id="load-btn" class="px-4 py-2 rounded-lg bg-purple-600 hover:bg-purple-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors">
-            ① Load TTS Engine
-          </button>
-          <span id="status" class="text-sm text-purple-200"></span>
-        </div>
-
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+        <div class="space-y-4">
+          <!-- Text Input -->
           <div>
-            <label for="voice-select" class="block text-sm font-medium mb-1">Voice</label>
-            <select id="voice-select" disabled class="w-full p-2 rounded-lg border border-purple-600 bg-purple-800 text-white disabled:opacity-60">
-              <option>Loading voices...</option>
+            <label for="tts-text" class="block text-sm font-medium text-gray-700 mb-2">
+              Enter text to convert to speech:
+            </label>
+            <textarea 
+              id="tts-text" 
+              class="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              rows="4"
+              placeholder="Type or paste your text here..."
+            ></textarea>
+          </div>
+
+          <!-- Voice Selection -->
+          <div>
+            <label for="voice-select" class="block text-sm font-medium text-gray-700 mb-2">
+              Select Voice:
+            </label>
+            <select 
+              id="voice-select"
+              class="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+            >
+              ${voices.map(voice => 
+                `<option value="${voice.id}" ${voice.id === (this.tts?.currentVoice || 'af') ? 'selected' : ''}>
+                  ${voice.name}
+                </option>`
+              ).join('')}
             </select>
           </div>
-          <div>
-            <label for="speed-input" class="block text-sm font-medium mb-1">Speed</label>
-            <input id="speed-input" type="number" value="1.0" min="0.5" max="2.0" step="0.1" 
-                   class="w-full p-2 rounded-lg border border-purple-600 bg-purple-800 text-white">
-          </div>
-        </div>
 
-        <div class="mb-4">
-          <label for="text-input" class="block text-sm font-medium mb-1">Text to Speak</label>
-          <textarea id="text-input" placeholder="Enter text to convert to speech..." 
-                    class="w-full h-24 p-3 rounded-lg border border-purple-600 bg-purple-800 text-white placeholder-purple-300 resize-none">Life is like a box of chocolates. You never know what you're gonna get.</textarea>
-        </div>
-
-        <div class="flex gap-2 items-center mb-4">
-          <button id="speak-btn" disabled class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors">
-            ② Generate & Play
+          <!-- Generate Button -->
+          <button 
+            id="generate-speech"
+            class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-md transition duration-300"
+          >
+            Generate Speech
           </button>
-          <a id="download-link" download="speech.wav" style="display: none;" class="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-decoration-none transition-colors">
-            Download WAV
-          </a>
-        </div>
 
-        <div class="mb-4">
-          <audio id="audio-player" controls class="w-full"></audio>
-        </div>
-
-        <div id="progress-container" class="mb-4" style="display: none;">
-          <div class="w-full bg-purple-700 rounded-full h-2 mb-2">
-            <div id="progress-bar" class="bg-gradient-to-r from-blue-500 to-purple-500 h-2 rounded-full transition-all duration-300" style="width: 0%;"></div>
-          </div>
-          <div id="progress-text" class="text-xs text-purple-200"></div>
-        </div>
-
-        <div class="bg-purple-800 rounded-lg p-3">
-          <h3 class="text-sm font-medium mb-2">Log</h3>
-          <div id="log" class="text-xs text-purple-200 max-h-32 overflow-y-auto whitespace-pre-wrap"></div>
+          <!-- Status Display -->
+          <div id="tts-status" class="text-center text-sm"></div>
         </div>
       </div>
     `;
 
-    // Get element references
-    this.elements = {
-      loadBtn: this.container.querySelector('#load-btn'),
-      speakBtn: this.container.querySelector('#speak-btn'),
-      status: this.container.querySelector('#status'),
-      voiceSelect: this.container.querySelector('#voice-select'),
-      speedInput: this.container.querySelector('#speed-input'),
-      textInput: this.container.querySelector('#text-input'),
-      audioPlayer: this.container.querySelector('#audio-player'),
-      downloadLink: this.container.querySelector('#download-link'),
-      progressContainer: this.container.querySelector('#progress-container'),
-      progressBar: this.container.querySelector('#progress-bar'),
-      progressText: this.container.querySelector('#progress-text'),
-      log: this.container.querySelector('#log')
-    };
-
-    // Set up UI event listeners
-    this.elements.loadBtn.addEventListener('click', () => this.handleLoad());
-    this.elements.speakBtn.addEventListener('click', () => this.handleSpeak());
-  }
-
-  log(message) {
-    console.log(message);
-    this.elements.log.textContent += (this.elements.log.textContent ? '\n' : '') + message;
-    this.elements.log.scrollTop = this.elements.log.scrollHeight;
-  }
-
-  async handleLoad() {
-    this.elements.loadBtn.disabled = true;
-    this.elements.status.textContent = 'Initializing...';
-    
-    try {
-      await this.tts.initialize();
-    } catch (error) {
-      console.error('Failed to initialize TTS:', error);
-      this.elements.loadBtn.disabled = false;
-    }
-  }
-
-  async handleSpeak() {
-    const text = this.elements.textInput.value.trim();
-    if (!text || !this.tts.isReady()) return;
-
-    this.elements.speakBtn.disabled = true;
-    this.elements.downloadLink.style.display = 'none';
-
-    const options = {
-      voice: this.elements.voiceSelect.value,
-      speed: parseFloat(this.elements.speedInput.value) || 1.0
-    };
-
-    try {
-      await this.tts.generateSpeech(text, options);
-    } catch (error) {
-      console.error('Speech generation failed:', error);
-      this.elements.speakBtn.disabled = false;
-    }
-  }
-
-  handleProgress(progress) {
-    this.log(`Progress: ${progress.message}`);
-    
-    if (progress.status === 'detecting' || progress.status === 'loading' || progress.status === 'generating') {
-      this.elements.progressContainer.style.display = 'block';
-      this.elements.progressText.textContent = progress.message;
-      
-      if (progress.status === 'generating') {
-        this.elements.progressBar.style.width = '50%';
-      }
-    } else if (progress.status === 'fallback') {
-      this.elements.progressText.textContent = progress.message;
-      this.log(`WebGPU fallback: ${progress.error}`);
-    } else if (progress.status === 'voices') {
-      this.elements.progressText.textContent = progress.message;
-      this.elements.progressBar.style.width = '80%';
-    }
-  }
-
-  handleReady(info) {
-    this.elements.status.textContent = `Ready (${info.backend.device})`;
-    this.elements.progressContainer.style.display = 'none';
-    this.elements.speakBtn.disabled = false;
-    this.log(`TTS engine ready with ${info.backend.device}/${info.backend.dtype}`);
-  }
-
-  handleError(error) {
-    this.elements.status.textContent = 'Error';
-    this.elements.progressContainer.style.display = 'none';
-    this.elements.progressText.textContent = `Error: ${error.message}`;
-    this.log(`Error: ${error.message}`);
-    console.error('TTS Error:', error);
-  }
-
-  handleVoicesLoaded(voices) {
-    this.elements.voiceSelect.innerHTML = '';
-    
-    voices.forEach(voice => {
-      const option = document.createElement('option');
-      option.value = voice;
-      option.textContent = voice;
-      this.elements.voiceSelect.appendChild(option);
-    });
-
-    // Set default voice
-    if (voices.includes('af_heart')) {
-      this.elements.voiceSelect.value = 'af_heart';
-    }
-
-    this.elements.voiceSelect.disabled = false;
-    this.log(`Loaded ${voices.length} voices: ${voices.join(', ')}`);
-  }
-
-  handleAudioGenerated(result) {
-    this.elements.progressContainer.style.display = 'none';
-    this.elements.speakBtn.disabled = false;
-    
-    // Set up audio player
-    this.elements.audioPlayer.src = result.url;
-    
-    // Try to play (may be blocked by autoplay policy)
-    this.elements.audioPlayer.play().catch(() => {
-      this.log('Autoplay blocked - click play button to hear audio');
-    });
-
-    // Set up download link
-    this.elements.downloadLink.href = result.url;
-    this.elements.downloadLink.style.display = 'inline-block';
-
-    // Clean up previous audio URL
-    if (this.currentAudio) {
-      URL.revokeObjectURL(this.currentAudio);
-    }
-    this.currentAudio = result.url;
-
-    const sizeKB = Math.round(result.size / 1024);
-    this.log(`Generated ${sizeKB} KB WAV with voice "${result.config.voice}" at speed ${result.config.speed}`);
+    this.setupEventListeners();
   }
 
   /**
-   * Cleanup resources
+   * Set up event listeners for the UI elements
    */
-  destroy() {
-    if (this.currentAudio) {
-      URL.revokeObjectURL(this.currentAudio);
+  setupEventListeners() {
+    if (!this.container) return;
+
+    const textArea = this.container.querySelector('#tts-text');
+    const generateBtn = this.container.querySelector('#generate-speech');
+    const voiceSelect = this.container.querySelector('#voice-select');
+
+    if (generateBtn) {
+      generateBtn.addEventListener('click', async () => {
+        const text = textArea?.value?.trim();
+        
+        if (!text) {
+          this.updateStatus('Please enter some text', 'error');
+          return;
+        }
+
+        if (!this.tts?.isInitialized) {
+          this.updateStatus('TTS engine not initialized', 'error');
+          return;
+        }
+
+        this.updateButtonState(true);
+        this.updateStatus('Generating speech...', 'loading');
+
+        try {
+          const result = await this.tts.generateSpeech(text);
+          
+          if (result.success) {
+            this.updateStatus('Speech generated successfully!', 'success');
+            
+            // Play the audio
+            const audio = new Audio(result.audioUrl);
+            await audio.play();
+          } else {
+            this.updateStatus(`Error: ${result.error}`, 'error');
+          }
+        } catch (error) {
+          this.updateStatus(`Error: ${error.message}`, 'error');
+        } finally {
+          this.updateButtonState(false);
+        }
+      });
     }
+
+    if (voiceSelect) {
+      voiceSelect.addEventListener('change', async (e) => {
+        const voiceId = e.target.value;
+        if (this.tts && voiceId) {
+          const result = await this.tts.changeVoice(voiceId);
+          if (result.success) {
+            this.updateStatus(`Voice changed to ${voiceId}`, 'success');
+          } else {
+            this.updateStatus(`Failed to change voice: ${result.error}`, 'error');
+          }
+        }
+      });
+    }
+  }
+
+  /**
+   * Update status message
+   * @param {string} message - Status message
+   * @param {string} type - Message type (success, error, loading)
+   */
+  updateStatus(message, type = 'info') {
+    const statusEl = this.container?.querySelector('#tts-status');
+    if (!statusEl) return;
+
+    statusEl.textContent = message;
+    
+    // Remove existing status classes
+    statusEl.className = statusEl.className.replace(/text-(red|green|blue|gray)-600/g, '');
+    
+    // Add appropriate color class
+    switch (type) {
+      case 'success':
+        statusEl.classList.add('text-green-600');
+        break;
+      case 'error':
+        statusEl.classList.add('text-red-600');
+        break;
+      case 'loading':
+        statusEl.classList.add('text-blue-600');
+        break;
+      default:
+        statusEl.classList.add('text-gray-600');
+    }
+  }
+
+  /**
+   * Update button state
+   * @param {boolean} loading - Whether button should show loading state
+   */
+  updateButtonState(loading) {
+    const button = this.container?.querySelector('#generate-speech');
+    if (!button) return;
+
+    button.disabled = loading;
+    button.textContent = loading ? 'Generating...' : 'Generate Speech';
   }
 }
