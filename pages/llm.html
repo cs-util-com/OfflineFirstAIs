@@ -30,29 +30,6 @@
       from { opacity: 1; }
       to { opacity: 0; }
     }
-
-    /* Styles from llm.md, adapted for this page */
-    .llm-demo-wrap {
-      max-width: 880px;
-      margin: 0 auto;
-      padding: 16px;
-      background: #0b0b0c;
-      color: #e7e7ea;
-      border-radius: 8px;
-    }
-    .llm-demo-wrap h2 { font-size: 20px; font-weight: 600; margin: 0 0 12px; }
-    .llm-demo-wrap .bar { display: flex; gap: 8px; margin: 12px 0 16px; }
-    .llm-demo-wrap textarea { width: 100%; min-height: 80px; padding: 10px; border-radius: 8px; border: 1px solid #2a2a2d; background:#131316; color:#e7e7ea; }
-    .llm-demo-wrap button { padding: 10px 14px; border-radius: 8px; border: 1px solid #2a2a2d; background:#1b1b1f; color:#e7e7ea; cursor:pointer; }
-    .llm-demo-wrap button[disabled] { opacity:.6; cursor:not-allowed; }
-    .llm-demo-wrap .row { display:flex; gap:10px; align-items:flex-start; margin: 10px 0; }
-    .llm-demo-wrap .role { flex: 0 0 88px; opacity:.7; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
-    .llm-demo-wrap .bubble { flex: 1 1 auto; white-space: pre-wrap; line-height: 1.45; background:#111114; border:1px solid #242428; border-radius:12px; padding:12px; }
-    .llm-demo-wrap .muted { opacity:.7; }
-    .llm-demo-wrap .status { margin-top: 6px; font-size:12px; opacity:.7; }
-    .llm-demo-wrap .footer { margin-top: 14px; display:flex; gap:8px; align-items:center; }
-    .llm-demo-wrap .tiny { font-size: 12px; opacity:.7; }
-    .llm-demo-wrap a { color:#9ecbff; }
   </style>
   <script>
     // Only use if browser supports View Transitions
@@ -85,19 +62,23 @@
       </div>
     </header>
     
-    <div class="bg-white p-6 rounded-lg shadow-md mb-8 feature-section">
-      <div class="llm-demo-wrap">
-        <h2>Gemma 3 270M (ONNX) – Vanilla JS</h2>
+    <div class="bg-white p-6 rounded-lg shadow-md mb-8">
+      <div class="max-w-4xl mx-auto p-4 bg-gray-900 text-gray-200 rounded-lg">
+        <h2 class="text-xl font-semibold mb-3 text-gray-200">Gemma 3 270M (ONNX) – Vanilla JS</h2>
   
-        <div id="chat"></div>
+        <div id="chat" class="mb-4"></div>
   
-        <div class="bar">
-          <textarea id="prompt" placeholder="Ask something…"></textarea>
-          <button id="send">Send</button>
+        <div class="flex gap-2 my-4">
+          <textarea id="prompt" placeholder="Ask something…" class="flex-1 min-h-20 p-3 rounded-lg border border-gray-600 bg-gray-800 text-gray-200 placeholder-gray-400 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
+          <button id="send" class="px-4 py-3 rounded-lg border border-gray-600 bg-gray-700 text-gray-200 hover:bg-gray-600 disabled:opacity-60 disabled:cursor-not-allowed transition-colors">Send</button>
         </div>
-        <div class="footer">
-          <button id="clear">Clear</button>
-          <span class="tiny" id="status"></span>
+        <div class="flex gap-2 items-center mt-4">
+          <button id="clear" class="px-4 py-2 rounded-lg border border-gray-600 bg-gray-700 text-gray-200 hover:bg-gray-600 transition-colors">Clear</button>
+          <span id="status" class="text-xs text-gray-400"></span>
+        </div>
+        <div id="progress-container" class="w-full bg-gray-600 rounded my-2 overflow-hidden" style="display: none;">
+          <div id="progress-bar" class="h-2 bg-blue-500 rounded transition-all duration-300 ease-out" style="width: 0%;"></div>
+          <div id="progress-text" class="text-xs text-gray-400 mt-1"></div>
         </div>
       </div>
     </div>
@@ -114,19 +95,59 @@
     const clearBtn = document.getElementById("clear");
     const promptEl = document.getElementById("prompt");
     const chatEl   = document.getElementById("chat");
+    const progressContainer = document.getElementById("progress-container");
+    const progressBar = document.getElementById("progress-bar");
+    const progressText = document.getElementById("progress-text");
 
     // Basic chat history (system + turns)
     const messages = [
       { role: "system", content: "You are a helpful, concise assistant." }
     ];
 
+    // Progress callback for model loading
+    function onProgress(progress) {
+      console.log('Progress update:', progress); // Debug log
+      
+      // Show progress container when any progress event occurs
+      progressContainer.style.display = 'block';
+      
+      if (progress.status === 'downloading' || progress.status === 'progress') {
+        if (progress.loaded && progress.total) {
+          const percentage = Math.round((progress.loaded / progress.total) * 100);
+          progressBar.style.width = `${percentage}%`;
+          const loadedMB = (progress.loaded / 1024 / 1024).toFixed(1);
+          const totalMB = (progress.total / 1024 / 1024).toFixed(1);
+          const fileName = progress.file || progress.name || 'model file';
+          progressText.textContent = `Downloading ${fileName}: ${percentage}% (${loadedMB}MB / ${totalMB}MB)`;
+        } else {
+          progressText.textContent = `Downloading ${progress.file || progress.name || 'model files'}...`;
+        }
+      } else if (progress.status === 'loading' || progress.status === 'initiate') {
+        progressText.textContent = `Loading ${progress.file || progress.name || 'model'}...`;
+      } else if (progress.status === 'done' || progress.status === 'ready') {
+        // Don't hide progress or show success message here - let the main loading handle it
+        progressText.textContent = `Finalizing ${progress.file || progress.name || 'model'}...`;
+      } else {
+        // Handle any other progress events
+        progressText.textContent = `${progress.status || 'Loading'}...`;
+      }
+    }
+
     // Helper to add chat bubbles
     function addBubble(role, text, isMuted = false) {
-      const row = document.createElement("div"); row.className = "row";
-      const r = document.createElement("div"); r.className = "role"; r.textContent = role;
-      const b = document.createElement("div"); b.className = "bubble"; if (isMuted) b.classList.add("muted");
+      const row = document.createElement("div"); 
+      row.className = "flex gap-3 items-start my-3";
+      
+      const r = document.createElement("div"); 
+      r.className = "flex-none w-20 text-xs uppercase tracking-wide opacity-70";
+      r.textContent = role;
+      
+      const b = document.createElement("div"); 
+      b.className = `flex-1 whitespace-pre-wrap leading-relaxed bg-gray-800 border border-gray-600 rounded-xl p-3 ${isMuted ? 'opacity-70' : ''}`;
       b.textContent = text;
-      row.append(r, b); chatEl.appendChild(row);
+      
+      row.append(r, b); 
+      chatEl.appendChild(row);
       return b;
     }
 
@@ -134,19 +155,31 @@
     const device = (navigator.gpu) ? "webgpu" : "wasm";
     const dtype = (device === "webgpu") ? "fp16" : "q4";
 
+    let generator;
+
     statusEl.textContent = `Loading model (device: ${device}, dtype: ${dtype})…`;
+    progressContainer.style.display = 'block';
+    progressText.textContent = 'Initializing model download...';
 
-    const generator = await pipeline(
-      "text-generation",
-      "onnx-community/gemma-3-270m-it-ONNX",
-      { device, dtype }
-    );
+    try {
+      generator = await pipeline(
+        "text-generation",
+        "onnx-community/gemma-3-270m-it-ONNX",
+        { device, dtype, progress_callback: onProgress }
+      );
 
-    statusEl.textContent = "Ready";
+      statusEl.textContent = "Ready";
+      progressContainer.style.display = 'none';
+    } catch (error) {
+      console.error('Error loading model:', error);
+      statusEl.textContent = "Error loading model";
+      progressContainer.style.display = 'none';
+      progressText.textContent = `Error: ${error.message}`;
+    }
 
     async function generate() {
       const userText = promptEl.value.trim();
-      if (!userText) return;
+      if (!userText || !generator) return;
 
       addBubble("User", userText);
       messages.push({ role: "user", content: userText });
