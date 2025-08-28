@@ -9,7 +9,7 @@ async function getKokoro(injectedLib = null) {
     return injectedLib;
   }
   
-  // Dynamic import for browser usage
+  // Dynamic import for browser usage - use the documented API
   const module = await import("https://cdn.jsdelivr.net/npm/kokoro-js@1.2.1/dist/kokoro.js");
   return module;
 }
@@ -19,7 +19,7 @@ async function getKokoro(injectedLib = null) {
  * Provides both standard and streaming TTS functionality
  */
 export class TTSEngine {
-  constructor(voice = 'af') {
+  constructor(voice = 'af_heart') {
     this.kokoroInstance = null;
     this.streamingInstance = null;
     this.kokoroLib = null;
@@ -28,6 +28,7 @@ export class TTSEngine {
     this.isGenerating = false;
     this.currentVoice = voice;
     this.streamingMode = false;
+    this.availableVoices = [];
   }
 
   /**
@@ -60,18 +61,47 @@ export class TTSEngine {
         message: 'Initializing TTS engine...' 
       });
 
-      // Initialize standard TTS
-      this.kokoroInstance = new kokoro.KokoroText2Speech();
-      await this.kokoroInstance.ready();
-      await this.kokoroInstance.loadVoice(this.currentVoice);
-
-      // Initialize streaming TTS if requested
-      if (this.streamingMode) {
-        this.streamingInstance = new kokoro.KokoroStreamingTTS();
-        await this.streamingInstance.ready();
-        await this.streamingInstance.loadVoice(this.currentVoice);
+      // Use the documented API from tts.md
+      const MODEL_ID = "onnx-community/Kokoro-82M-v1.0-ONNX";
+      
+      // Detect WebGPU support and choose backend
+      let backend = { device: 'wasm', dtype: 'q8' }; // default fallback
+      
+      if ('gpu' in navigator) {
+        try {
+          const adapter = await navigator.gpu.requestAdapter();
+          if (adapter) {
+            backend = { device: 'webgpu', dtype: 'fp32' };
+          }
+        } catch (e) {
+          // Fall back to WASM
+        }
       }
 
+      progressCallback({ 
+        status: 'loading', 
+        message: `Loading model with ${backend.device}...` 
+      });
+
+      // Initialize using the proper API
+      try {
+        this.kokoroInstance = await kokoro.KokoroTTS.from_pretrained(MODEL_ID, backend);
+      } catch (err) {
+        // If WebGPU fails, fall back to WASM
+        if (backend.device === 'webgpu') {
+          progressCallback({ 
+            status: 'loading', 
+            message: 'WebGPU failed, falling back to WASM...' 
+          });
+          this.kokoroInstance = await kokoro.KokoroTTS.from_pretrained(MODEL_ID, { device: 'wasm', dtype: 'q8' });
+        } else {
+          throw err;
+        }
+      }
+
+      // Load available voices
+      this.availableVoices = await this.kokoroInstance.list_voices();
+      
       this.isInitialized = true;
       
       progressCallback({ 
@@ -107,16 +137,14 @@ export class TTSEngine {
     this.isGenerating = true;
 
     try {
-      // Generate audio data
-      const audioData = await this.kokoroInstance.tts(text);
+      // Generate audio using the documented API
+      const audio = await this.kokoroInstance.generate(text, { 
+        voice: this.currentVoice, 
+        speed: 1.0 
+      });
       
-      // Create WAV file - use the library that was originally injected
-      const kokoro = this.kokoroLib || await getKokoro();
-      const header = kokoro.writeWAVHeader(audioData.length, 24000);
-      const wavData = kokoro.writeWAVData(audioData, 24000);
-      
-      // Create blob and URL
-      const blob = new Blob([header, wavData], { type: 'audio/wav' });
+      // Convert to blob using the documented method
+      const blob = await audio.toBlob();
       const audioUrl = URL.createObjectURL(blob);
       
       return { success: true, audioUrl };
@@ -136,27 +164,8 @@ export class TTSEngine {
    * @param {Function} onError - Called on error
    */
   async streamSpeech(text, onChunk, onComplete, onError) {
-    if (!this.streamingMode) {
-      onError('Streaming mode not enabled');
-      return;
-    }
-
-    if (!this.isInitialized) {
-      onError('TTS engine not initialized');
-      return;
-    }
-
-    try {
-      const generator = this.streamingInstance.streamTTS(text);
-      
-      for (const chunk of generator) {
-        onChunk(chunk);
-      }
-      
-      onComplete();
-    } catch (error) {
-      onError(error.message);
-    }
+    onError('Streaming mode not currently supported with the new kokoro-js API');
+    return;
   }
 
   /**
@@ -170,12 +179,6 @@ export class TTSEngine {
     }
 
     try {
-      await this.kokoroInstance.loadVoice(voiceId);
-      
-      if (this.streamingInstance) {
-        await this.streamingInstance.loadVoice(voiceId);
-      }
-      
       this.currentVoice = voiceId;
       return { success: true };
     } catch (error) {
@@ -188,11 +191,15 @@ export class TTSEngine {
    * @returns {Array} Array of voice objects
    */
   getAvailableVoices() {
-    if (!this.isInitialized || !this.kokoroInstance) {
+    if (!this.isInitialized) {
       return [];
     }
     
-    return this.kokoroInstance.voices || [];
+    // Return voices in the format expected by the UI
+    return this.availableVoices.map(voice => ({
+      id: voice,
+      name: voice
+    }));
   }
 
   /**

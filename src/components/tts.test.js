@@ -7,15 +7,14 @@ import { TTSEngine, TTSUI } from './tts.js';
 
 // Mock kokoro-js library for testing
 const mockKokoroJS = {
-  KokoroText2Speech: jest.fn().mockImplementation(() => ({
-    ready: jest.fn().mockResolvedValue(true),
-    tts: jest.fn().mockResolvedValue(new Float32Array(1024)),
-    loadVoice: jest.fn().mockResolvedValue(true),
-    voices: [
-      { id: 'af', name: 'Bella' },
-      { id: 'af_bella', name: 'Bella (Variant)' }
-    ]
-  })),
+  KokoroTTS: {
+    from_pretrained: jest.fn().mockImplementation(() => ({
+      generate: jest.fn().mockResolvedValue({
+        toBlob: jest.fn().mockResolvedValue(new Blob(['mock audio data'], { type: 'audio/wav' }))
+      }),
+      list_voices: jest.fn().mockResolvedValue(['af_heart', 'af_bella', 'am_michael', 'bf_emma'])
+    }))
+  },
   writeWAVHeader: jest.fn().mockReturnValue(new ArrayBuffer(44)),
   writeWAVData: jest.fn().mockReturnValue(new ArrayBuffer(2048)),
   KokoroStreamingTTS: jest.fn().mockImplementation(() => ({
@@ -81,7 +80,7 @@ describe('TTSEngine', () => {
       expect(ttsEngine.isInitialized).toBe(false);
       expect(ttsEngine.isLoading).toBe(false);
       expect(ttsEngine.isGenerating).toBe(false);
-      expect(ttsEngine.currentVoice).toBe('af');
+      expect(ttsEngine.currentVoice).toBe('af_heart');
       expect(ttsEngine.streamingMode).toBe(false);
       expect(ttsEngine.kokoroInstance).toBeNull();
     });
@@ -119,7 +118,7 @@ describe('TTSEngine', () => {
       await ttsEngine.initialize(mockProgressCallback, mockErrorCallback, mockKokoroJS);
       
       expect(ttsEngine.isInitialized).toBe(true);
-      expect(mockKokoroJS.KokoroText2Speech).toHaveBeenCalled();
+      expect(mockKokoroJS.KokoroTTS.from_pretrained).toHaveBeenCalled();
     });
 
     test('should handle initialization progress updates', async () => {
@@ -150,9 +149,11 @@ describe('TTSEngine', () => {
 
     test('should handle library loading errors', async () => {
       const mockFailingLibrary = {
-        KokoroText2Speech: jest.fn().mockImplementation(() => {
-          throw new Error('Failed to initialize');
-        })
+        KokoroTTS: {
+          from_pretrained: jest.fn().mockImplementation(() => {
+            throw new Error('Failed to initialize');
+          })
+        }
       };
 
       await ttsEngine.initialize(mockProgressCallback, mockErrorCallback, mockFailingLibrary);
@@ -165,11 +166,11 @@ describe('TTSEngine', () => {
 
     test('should handle engine ready() failure', async () => {
       const mockFailingEngine = {
-        KokoroText2Speech: jest.fn().mockImplementation(() => ({
-          ready: jest.fn().mockRejectedValue(new Error('Engine not ready')),
-          loadVoice: jest.fn(),
-          voices: []
-        }))
+        KokoroTTS: {
+          from_pretrained: jest.fn().mockImplementation(() => {
+            throw new Error('Engine not ready');
+          })
+        }
       };
 
       await ttsEngine.initialize(mockProgressCallback, mockErrorCallback, mockFailingEngine);
@@ -192,7 +193,10 @@ describe('TTSEngine', () => {
         success: true,
         audioUrl: 'blob:mock-url'
       }));
-      expect(ttsEngine.kokoroInstance.tts).toHaveBeenCalledWith('Hello world');
+      expect(ttsEngine.kokoroInstance.generate).toHaveBeenCalledWith('Hello world', { 
+        voice: 'af_heart', 
+        speed: 1.0 
+      });
     });
 
     test('should handle empty text', async () => {
@@ -228,7 +232,7 @@ describe('TTSEngine', () => {
     });
 
     test('should handle TTS generation errors', async () => {
-      ttsEngine.kokoroInstance.tts.mockRejectedValue(new Error('TTS failed'));
+      ttsEngine.kokoroInstance.generate.mockRejectedValue(new Error('TTS failed'));
       
       const result = await ttsEngine.generateSpeech('Hello world');
       
@@ -239,17 +243,18 @@ describe('TTSEngine', () => {
     });
 
     test('should create audio blob correctly', async () => {
-      const mockAudioData = new Float32Array([0.1, 0.2, 0.3]);
-      ttsEngine.kokoroInstance.tts.mockResolvedValue(mockAudioData);
+      const mockBlob = new Blob(['test audio'], { type: 'audio/wav' });
+      const mockAudioData = {
+        toBlob: jest.fn().mockResolvedValue(mockBlob)
+      };
+      ttsEngine.kokoroInstance.generate.mockResolvedValue(mockAudioData);
       
-      await ttsEngine.generateSpeech('Test');
+      const result = await ttsEngine.generateSpeech('Test');
       
-      expect(mockKokoroJS.writeWAVHeader).toHaveBeenCalledWith(mockAudioData.length, 24000);
-      expect(mockKokoroJS.writeWAVData).toHaveBeenCalledWith(mockAudioData, 24000);
-      expect(global.Blob).toHaveBeenCalledWith(
-        [expect.any(ArrayBuffer), expect.any(ArrayBuffer)],
-        { type: 'audio/wav' }
-      );
+      expect(mockAudioData.toBlob).toHaveBeenCalled();
+      expect(result.success).toBe(true);
+      expect(result.audioUrl).toBe('blob:mock-url');
+      expect(global.URL.createObjectURL).toHaveBeenCalledWith(mockBlob);
     });
   });
 
@@ -267,9 +272,9 @@ describe('TTSEngine', () => {
       
       await ttsEngine.streamSpeech('Hello world', onChunk, onComplete, onError);
       
-      expect(chunks).toHaveLength(2);
-      expect(onComplete).toHaveBeenCalled();
-      expect(onError).not.toHaveBeenCalled();
+      expect(onError).toHaveBeenCalledWith('Streaming mode not currently supported with the new kokoro-js API');
+      expect(chunks).toHaveLength(0);
+      expect(onComplete).not.toHaveBeenCalled();
     });
 
     test('should require streaming mode', async () => {
@@ -278,19 +283,14 @@ describe('TTSEngine', () => {
       
       await ttsEngine.streamSpeech('Hello', jest.fn(), jest.fn(), onError);
       
-      expect(onError).toHaveBeenCalledWith('Streaming mode not enabled');
+      expect(onError).toHaveBeenCalledWith('Streaming mode not currently supported with the new kokoro-js API');
     });
 
     test('should handle streaming errors', async () => {
-      ttsEngine.streamingInstance.streamTTS.mockImplementation(function* () {
-        yield new Float32Array(256); // Need a yield for generator function
-        throw new Error('Streaming failed');
-      });
-      
       const onError = jest.fn();
       await ttsEngine.streamSpeech('Hello', jest.fn(), jest.fn(), onError);
       
-      expect(onError).toHaveBeenCalledWith('Streaming failed');
+      expect(onError).toHaveBeenCalledWith('Streaming mode not currently supported with the new kokoro-js API');
     });
   });
 
@@ -304,16 +304,15 @@ describe('TTSEngine', () => {
       
       expect(result.success).toBe(true);
       expect(ttsEngine.currentVoice).toBe('af_bella');
-      expect(ttsEngine.kokoroInstance.loadVoice).toHaveBeenCalledWith('af_bella');
     });
 
     test('should handle voice loading errors', async () => {
-      ttsEngine.kokoroInstance.loadVoice.mockRejectedValue(new Error('Voice not found'));
-      
+      // Since we simplified the voice changing, we just set currentVoice
+      // and let the next generate call use the new voice
       const result = await ttsEngine.changeVoice('invalid_voice');
       
-      expect(result.success).toBe(false);
-      expect(result.error).toBe('Voice not found');
+      expect(result.success).toBe(true);
+      expect(ttsEngine.currentVoice).toBe('invalid_voice');
     });
 
     test('should require initialization', async () => {
@@ -336,8 +335,10 @@ describe('TTSEngine', () => {
       const voices = ttsEngine.getAvailableVoices();
       
       expect(voices).toEqual([
-        { id: 'af', name: 'Bella' },
-        { id: 'af_bella', name: 'Bella (Variant)' }
+        { id: 'af_heart', name: 'af_heart' },
+        { id: 'af_bella', name: 'af_bella' },
+        { id: 'am_michael', name: 'am_michael' },
+        { id: 'bf_emma', name: 'bf_emma' }
       ]);
     });
   });
@@ -605,7 +606,10 @@ describe('Integration Tests', () => {
     
     await new Promise(resolve => setTimeout(resolve, 0));
     
-    expect(engine.kokoroInstance.tts).toHaveBeenCalledWith('Integration test');
+    expect(engine.kokoroInstance.generate).toHaveBeenCalledWith('Integration test', { 
+      voice: 'af_heart', 
+      speed: 1.0 
+    });
     
     document.body.removeChild(container);
   });
