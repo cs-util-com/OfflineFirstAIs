@@ -250,7 +250,7 @@ export class TTSUI {
               class="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               rows="4"
               placeholder="Type or paste your text here..."
-            ></textarea>
+            >Hello — this is a short demo text for testing Text-to-Speech. Replace it with your own text.</textarea>
           </div>
 
           <!-- Voice Selection -->

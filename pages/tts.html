@@ -71,14 +71,35 @@
   <script type="module">
     import { TTSEngine, TTSUI } from '../src/components/tts.js';
 
-    // Initialize the TTS engine
-    const ttsEngine = new TTSEngine({
-      defaultVoice: "af_heart"
-    });
+    (async () => {
+      // Container where the UI will be rendered
+      const container = document.getElementById('tts-container');
 
-    // Create the UI
-    const container = document.getElementById('tts-container');
-    const ttsUI = new TTSUI(container, ttsEngine);
+      // Create the TTS engine with a voice id (constructor expects a string)
+      const ttsEngine = new TTSEngine('af_heart');
+
+      // Try to initialize the engine (best-effort). Failures won't prevent the UI from rendering.
+      try {
+        await ttsEngine.initialize(
+          (progress) => {
+            // If the UI is already rendered, update status element
+            const status = container.querySelector('#tts-status');
+            if (status && progress && progress.message) status.textContent = progress.message;
+          },
+          (err) => {
+            const status = container.querySelector('#tts-status');
+            if (status) status.textContent = String(err);
+          }
+        );
+      } catch (e) {
+        // swallow - initialization is optional for UI to appear
+        console.warn('TTS initialization error:', e);
+      }
+
+      // Create and render the UI correctly (TTSUI expects the engine as its only constructor arg)
+      const ttsUI = new TTSUI(ttsEngine);
+      ttsUI.render(container);
+    })();
   </script>
 </body>
 </html>
