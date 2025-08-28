@@ -283,6 +283,7 @@ describe('TTSEngine', () => {
 
     test('should handle streaming errors', async () => {
       ttsEngine.streamingInstance.streamTTS.mockImplementation(function* () {
+        yield new Float32Array(256); // Need a yield for generator function
         throw new Error('Streaming failed');
       });
       

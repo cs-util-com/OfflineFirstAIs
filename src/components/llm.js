@@ -310,7 +310,7 @@ export class LLMChatUI {
     }
   }
 
-  handleReady(info) {
+  handleReady() {
     this.elements.status.textContent = 'Ready';
     this.elements.progressContainer.style.display = 'none';
     this.elements.prompt.focus();
