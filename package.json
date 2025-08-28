@@ -12,6 +12,7 @@
     "test:browser:debug": "playwright test --debug",
     "test:browser:headed": "playwright test --headed",
     "test:all": "npm run test && npm run test:browser",
+    "serve": "node server.js",
     "mutation": "stryker run config/stryker.conf.json; node mutation-testing/mutation-report-to-md.js",
     "check:dup": "jscpd --config config/.jscpd.json src",
     "check:cycles": "madge --circular --extensions js src",

@@ -1,5 +1,4 @@
 import { test, expect } from '@playwright/test';
-import { resolve } from 'path';
 
 test.describe('TTS Page Browser Tests', () => {
   test('should load TTS page without errors', async ({ page }) => {
@@ -11,16 +10,16 @@ test.describe('TTS Page Browser Tests', () => {
       }
     });
 
-    // Navigate to the TTS page
-    const ttsPath = resolve(process.cwd(), 'pages/tts.html');
-    await page.goto(`file://${ttsPath}`);
+    // Navigate to the TTS page via HTTP server
+    await page.goto('http://localhost:3000/pages/tts.html');
 
     // Wait for the page to load
     await page.waitForLoadState('networkidle');
 
     // Check that the page has loaded successfully
-    await expect(page.locator('title')).toContainText('TTS Demo');
-    await expect(page.locator('h1')).toContainText('Text-to-Speech Demo');
+    await expect(page.locator('title')).toContainText('TTS Demo - Template Web App');
+    await expect(page.locator('h1')).toContainText('Template Web App');
+    await expect(page.locator('h2')).toContainText('Text-to-Speech Demo');
 
     // Check for critical errors (ignore module resolution warnings)
     const criticalErrors = consoleErrors.filter(error => 
@@ -39,16 +38,14 @@ test.describe('TTS Page Browser Tests', () => {
   });
 
   test('should have TTS interface elements', async ({ page }) => {
-    const ttsPath = resolve(process.cwd(), 'pages/tts.html');
-    await page.goto(`file://${ttsPath}`);
+    await page.goto('http://localhost:3000/pages/tts.html');
     await page.waitForLoadState('networkidle');
 
     // Check for TTS interface elements
-    await expect(page.locator('#text')).toBeVisible();
-    await expect(page.locator('#speakBtn')).toBeVisible();
-    await expect(page.locator('#status')).toBeVisible();
-    await expect(page.locator('#voiceSelect')).toBeVisible();
-    await expect(page.locator('#speedRange')).toBeVisible();
+    await expect(page.locator('#tts-text')).toBeVisible();
+    await expect(page.locator('#generate-speech')).toBeVisible();
+    await expect(page.locator('#tts-status')).toBeVisible();
+    await expect(page.locator('#voice-select')).toBeVisible();
   });
 
   test('should show network/module loading errors for CDN dependencies', async ({ page }) => {
@@ -66,8 +63,7 @@ test.describe('TTS Page Browser Tests', () => {
       consoleMessages.push({ type: msg.type(), text: msg.text() });
     });
 
-    const ttsPath = resolve(process.cwd(), 'pages/tts.html');
-    await page.goto(`file://${ttsPath}`);
+    await page.goto('http://localhost:3000/pages/tts.html');
     await page.waitForLoadState('networkidle');
 
     // Log network errors and console messages for analysis
@@ -83,21 +79,20 @@ test.describe('TTS Page Browser Tests', () => {
   });
 
   test('should handle TTS button click gracefully', async ({ page }) => {
-    const ttsPath = resolve(process.cwd(), 'pages/tts.html');
-    await page.goto(`file://${ttsPath}`);
+    await page.goto('http://localhost:3000/pages/tts.html');
     await page.waitForLoadState('networkidle');
 
     // Fill in some text
-    await page.fill('#text', 'Hello, this is a test.');
+    await page.fill('#tts-text', 'Hello, this is a test.');
 
     // Try clicking the speak button
-    const statusBefore = await page.locator('#status').textContent();
-    await page.click('#speakBtn');
+    const statusBefore = await page.locator('#tts-status').textContent();
+    await page.click('#generate-speech');
 
     // Wait a moment for any status updates
     await page.waitForTimeout(1000);
 
-    const statusAfter = await page.locator('#status').textContent();
+    const statusAfter = await page.locator('#tts-status').textContent();
 
     // The status should either update or remain the same
     // (depending on whether TTS engine loads successfully)
@@ -119,8 +114,7 @@ test.describe('TTS Page Browser Tests', () => {
       }
     });
 
-    const ttsPath = resolve(process.cwd(), 'pages/tts.html');
-    await page.goto(`file://${ttsPath}`);
+    await page.goto('http://localhost:3000/pages/tts.html');
     await page.waitForLoadState('networkidle');
 
     // Wait for module loading attempts
