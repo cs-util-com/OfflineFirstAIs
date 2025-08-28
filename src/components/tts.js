@@ -11,7 +11,8 @@ async function getKokoro(injectedLib = null) {
   
   // Dynamic import for browser usage - use the documented API
   const module = await import("https://cdn.jsdelivr.net/npm/kokoro-js@1.2.1/dist/kokoro.js");
-  return module;
+  // Return the KokoroTTS class directly
+  return module.KokoroTTS;
 }
 
 /**
@@ -51,10 +52,10 @@ export class TTSEngine {
       });
 
       // Use injected library or load from CDN
-      const kokoro = kokoroLib || await getKokoro();
+      const KokoroTTS = kokoroLib || await getKokoro();
       
       // Store the library reference for later use
-      this.kokoroLib = kokoro;
+      this.kokoroLib = KokoroTTS;
       
       progressCallback({ 
         status: 'loading', 
@@ -85,7 +86,7 @@ export class TTSEngine {
 
       // Initialize using the proper API
       try {
-        this.kokoroInstance = await kokoro.KokoroTTS.from_pretrained(MODEL_ID, backend);
+        this.kokoroInstance = await KokoroTTS.from_pretrained(MODEL_ID, backend);
       } catch (err) {
         // If WebGPU fails, fall back to WASM
         if (backend.device === 'webgpu') {
@@ -93,7 +94,7 @@ export class TTSEngine {
             status: 'loading', 
             message: 'WebGPU failed, falling back to WASM...' 
           });
-          this.kokoroInstance = await kokoro.KokoroTTS.from_pretrained(MODEL_ID, { device: 'wasm', dtype: 'q8' });
+          this.kokoroInstance = await KokoroTTS.from_pretrained(MODEL_ID, { device: 'wasm', dtype: 'q8' });
         } else {
           throw err;
         }

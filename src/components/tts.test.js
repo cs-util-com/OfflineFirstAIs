@@ -7,14 +7,17 @@ import { TTSEngine, TTSUI } from './tts.js';
 
 // Mock kokoro-js library for testing
 const mockKokoroJS = {
-  KokoroTTS: {
-    from_pretrained: jest.fn().mockImplementation(() => ({
-      generate: jest.fn().mockResolvedValue({
-        toBlob: jest.fn().mockResolvedValue(new Blob(['mock audio data'], { type: 'audio/wav' }))
-      }),
-      list_voices: jest.fn().mockResolvedValue(['af_heart', 'af_bella', 'am_michael', 'bf_emma'])
-    }))
-  },
+  from_pretrained: jest.fn().mockImplementation(() => ({
+    generate: jest.fn().mockResolvedValue({
+      toBlob: jest.fn().mockResolvedValue(new Blob(['mock audio data'], { type: 'audio/wav' }))
+    }),
+    list_voices: jest.fn().mockResolvedValue(['af_heart', 'af_bella', 'am_michael', 'bf_emma'])
+  }))
+};
+
+// Mock additional functions that might be used
+const mockKokoroJSFull = {
+  ...mockKokoroJS,
   writeWAVHeader: jest.fn().mockReturnValue(new ArrayBuffer(44)),
   writeWAVData: jest.fn().mockReturnValue(new ArrayBuffer(2048)),
   KokoroStreamingTTS: jest.fn().mockImplementation(() => ({
@@ -118,7 +121,7 @@ describe('TTSEngine', () => {
       await ttsEngine.initialize(mockProgressCallback, mockErrorCallback, mockKokoroJS);
       
       expect(ttsEngine.isInitialized).toBe(true);
-      expect(mockKokoroJS.KokoroTTS.from_pretrained).toHaveBeenCalled();
+      expect(mockKokoroJS.from_pretrained).toHaveBeenCalled();
     });
 
     test('should handle initialization progress updates', async () => {
@@ -149,11 +152,9 @@ describe('TTSEngine', () => {
 
     test('should handle library loading errors', async () => {
       const mockFailingLibrary = {
-        KokoroTTS: {
-          from_pretrained: jest.fn().mockImplementation(() => {
-            throw new Error('Failed to initialize');
-          })
-        }
+        from_pretrained: jest.fn().mockImplementation(() => {
+          throw new Error('Failed to initialize');
+        })
       };
 
       await ttsEngine.initialize(mockProgressCallback, mockErrorCallback, mockFailingLibrary);
@@ -166,11 +167,9 @@ describe('TTSEngine', () => {
 
     test('should handle engine ready() failure', async () => {
       const mockFailingEngine = {
-        KokoroTTS: {
-          from_pretrained: jest.fn().mockImplementation(() => {
-            throw new Error('Engine not ready');
-          })
-        }
+        from_pretrained: jest.fn().mockImplementation(() => {
+          throw new Error('Engine not ready');
+        })
       };
 
       await ttsEngine.initialize(mockProgressCallback, mockErrorCallback, mockFailingEngine);

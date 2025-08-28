@@ -140,11 +140,14 @@
           (err) => {
             const status = container.querySelector('#tts-status');
             if (status) status.textContent = String(err);
+            console.error('TTS initialization error:', err);
           }
         );
       } catch (e) {
-        // swallow - initialization is optional for UI to appear
-        console.warn('TTS initialization error:', e);
+        // Show initialization errors in the UI
+        const status = container.querySelector('#tts-status');
+        if (status) status.textContent = `Initialization failed: ${e.message}`;
+        console.error('TTS initialization error:', e);
       }
 
       // Create and render the UI correctly (TTSUI expects the engine as its only constructor arg)
