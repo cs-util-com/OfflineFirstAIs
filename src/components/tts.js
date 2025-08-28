@@ -232,57 +232,33 @@ export class TTSUI {
    */
   render(container) {
     this.container = container;
-    
+
     const voices = this.tts ? this.tts.getAvailableVoices() : [];
-    
-    container.innerHTML = `
-      <div class="max-w-4xl mx-auto p-6 bg-white rounded-lg shadow-lg">
-        <h2 class="text-2xl font-bold mb-6 text-center text-gray-800">Text-to-Speech Demo</h2>
-        
-        <div class="space-y-4">
-          <!-- Text Input -->
-          <div>
-            <label for="tts-text" class="block text-sm font-medium text-gray-700 mb-2">
-              Enter text to convert to speech:
-            </label>
-            <textarea 
-              id="tts-text" 
-              class="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              rows="4"
-              placeholder="Type or paste your text here..."
-            >Hello — this is a short demo text for testing Text-to-Speech. Replace it with your own text.</textarea>
-          </div>
 
-          <!-- Voice Selection -->
-          <div>
-            <label for="voice-select" class="block text-sm font-medium text-gray-700 mb-2">
-              Select Voice:
-            </label>
-            <select 
-              id="voice-select"
-              class="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
-            >
-              ${voices.map(voice => 
-                `<option value="${voice.id}" ${voice.id === (this.tts?.currentVoice || 'af') ? 'selected' : ''}>
-                  ${voice.name}
-                </option>`
-              ).join('')}
-            </select>
-          </div>
+    // If the container already has the expected DOM (e.g., from pages/tts.html), reuse it.
+    const existingTextarea = container.querySelector('#tts-text');
+    const existingSelect = container.querySelector('#voice-select');
+    const existingButton = container.querySelector('#generate-speech');
+    const existingStatus = container.querySelector('#tts-status');
+    if (!(existingTextarea && existingSelect && existingButton && existingStatus)) {
+      console.warn('TTSUI.render: expected TTS DOM to exist in container; aborting render.');
+      return;
+    }
 
-          <!-- Generate Button -->
-          <button 
-            id="generate-speech"
-            class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-md transition duration-300"
-          >
-            Generate Speech
-          </button>
+    // Populate voices into existing select element
+    existingSelect.innerHTML = '';
+    if (Array.isArray(voices) && voices.length > 0) {
+      voices.forEach(voice => {
+        const option = document.createElement('option');
+        option.value = voice.id;
+        option.textContent = voice.name;
+        if (voice.id === (this.tts?.currentVoice || 'af')) option.selected = true;
+        existingSelect.appendChild(option);
+      });
+    }
 
-          <!-- Status Display -->
-          <div id="tts-status" class="text-center text-sm"></div>
-        </div>
-      </div>
-    `;
+    // Ensure container is visible (in case it was hidden)
+    container.style.display = '';
 
     this.setupEventListeners();
   }

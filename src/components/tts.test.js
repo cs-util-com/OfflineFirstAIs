@@ -363,6 +363,24 @@ describe('TTSUI', () => {
     container = document.createElement('div');
     container.id = 'tts-container';
     document.body.appendChild(container);
+    // Pre-populate container with static TTS markup so the UI code can reuse it
+    container.innerHTML = `
+      <div class="max-w-4xl mx-auto p-6 bg-white rounded-lg shadow-lg">
+        <h2 class="text-2xl font-bold mb-6 text-center text-gray-800">Text-to-Speech Demo</h2>
+        <div class="space-y-4">
+          <div>
+            <label for="tts-text" class="block text-sm font-medium text-gray-700 mb-2">Enter text to convert to speech:</label>
+            <textarea id="tts-text" class="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent" rows="4" placeholder="Type or paste your text here...">Hello — this is a short demo text for testing Text-to-Speech. Replace it with your own text.</textarea>
+          </div>
+          <div>
+            <label for="voice-select" class="block text-sm font-medium text-gray-700 mb-2">Select Voice:</label>
+            <select id="voice-select" class="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"></select>
+          </div>
+          <button id="generate-speech" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-md transition duration-300" type="button">Generate Speech</button>
+          <div id="tts-status" class="text-center text-sm"></div>
+        </div>
+      </div>
+    `;
 
     // Mock TTSEngine
     mockTTSEngine = {
@@ -556,6 +574,22 @@ describe('Integration Tests', () => {
   test('should integrate TTSEngine and TTSUI', async () => {
     const container = document.createElement('div');
     document.body.appendChild(container);
+    container.innerHTML = `
+      <div class="max-w-4xl mx-auto p-6 bg-white rounded-lg shadow-lg">
+        <h2 class="text-2xl font-bold mb-6 text-center text-gray-800">Text-to-Speech Demo</h2>
+        <div class="space-y-4">
+          <div>
+            <label for="tts-text">Enter text to convert to speech:</label>
+            <textarea id="tts-text">Hello — this is a short demo text for testing Text-to-Speech. Replace it with your own text.</textarea>
+          </div>
+          <div>
+            <select id="voice-select"></select>
+          </div>
+          <button id="generate-speech" type="button">Generate Speech</button>
+          <div id="tts-status"></div>
+        </div>
+      </div>
+    `;
     
     const engine = new TTSEngine();
     await engine.initialize(jest.fn(), jest.fn(), mockKokoroJS);
