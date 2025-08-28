@@ -1,6 +1,10 @@
 # Stryker Mutation testing
 .stryker-tmp/
 
+# Playwright Test results
+playwright-report/
+test-results/
+
 # Logs
 logs
 *.log
